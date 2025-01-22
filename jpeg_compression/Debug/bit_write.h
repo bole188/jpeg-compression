@@ -21,7 +21,7 @@ typedef struct {
     int      bitcount;
 } bit_writer_t;
 
-void bw_init(bit_writer_t *bw, unsigned char *buffer, size_t cap) {
+void bw_init(bit_writer_t pm *bw, unsigned char *buffer, size_t cap) {
     bw->buf = buffer;
     bw->capacity = cap;
     bw->size = 0;
@@ -29,7 +29,7 @@ void bw_init(bit_writer_t *bw, unsigned char *buffer, size_t cap) {
     bw->bitcount = 0;
 }
 
-inline void bw_write_bits(bit_writer_t *bw, unsigned short bits, int nbits)
+inline void bw_write_bits(bit_writer_t pm*bw, unsigned short bits, int nbits)
 {
     bits &= ((1U << nbits) - 1);
 
@@ -51,7 +51,7 @@ inline void bw_write_bits(bit_writer_t *bw, unsigned short bits, int nbits)
 }
 
 
-void bw_flush(bit_writer_t* bw)
+void bw_flush(bit_writer_t pm* bw)
 {
     if (bw->bitcount == 0)
         return;

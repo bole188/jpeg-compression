@@ -559,6 +559,11 @@ PROCESSOR p0
 	  	INPUT_SECTIONS($OBJS_LIBS(seg_flash))
 	  } > mem_flash
 	  
+	  seg_dm_block
+	  {
+	  	INPUT_SECTIONS($OBJS_LIBS(seg_dm_block))
+	  } > mem_block3_dm32
+	  
       /*$VDSG<insert-new-sections-at-the-end>                   */
       /* Text inserted between these $VDSG comments will be preserved */
       /*$VDSG<insert-new-sections-at-the-end>                   */

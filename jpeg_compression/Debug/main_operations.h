@@ -45,8 +45,9 @@ jpeg_quant_table_t qt_luminance = {
 	}
 };
 
-inline void center_pixels(unsigned char* restrict img_pixels,signed short pm* output_data) {
-#pragma optimize_for_(8)
+inline void center_pixels(signed short* restrict img_pixels,signed short pm* output_data) {
+#pragma all_external_access_reg_optimized
+#pragma vector_for
 	for(int i = 0;i<64;i++)
 	{
 		output_data[i] = (signed short pm)(img_pixels[i])-128;
@@ -83,39 +84,42 @@ void segment_into_blocks(const unsigned char* restrict not_centered_pixels, int 
     }
 }
 // the following functions operate on a single block, it is required to traverse through all blocks
-inline void dct_and_quantize(signed short pm* block_ptr, const jpeg_quant_table_t* qt)
+inline void dct_and_quantize(signed short pm* block_ptr, const jpeg_quant_table_t* qt, float pm* restrict temp)
 {
-    double temp[8][8];
-    double alpha_u, alpha_v;
-
     // Forward 2D DCT
-    for (int u = 0; u < 8; u++) { // u is frequency row index
-        for (int v = 0; v < 8; v++) { // v is frequency col index
+    for (int u = 8; u != 0; u--) {
+        for (int v = 8; v != 0; v--) {
             float sum = 0.0;
-            for (int y = 0; y < 8; y++) { // y is pixel row index
-                for (int x = 0; x < 8; x++) { // x is pixel col index
-                    // Correct pairing: u with y, v with x
-                    sum += block_ptr[y * 8 + x] *
-                           cos((2*y + 1) * u * PI / 16.0) *
-                           cos((2*x + 1) * v * PI / 16.0);
+            for (int y = 8; y != 0; y--) {
+                for (int x = 8; x != 0; x--) {
+                	int real_x = x-1;
+                	int real_u = u-1;
+                	int real_y = y-1;
+                	int real_v = v-1;
+                	int block_ptr_index = real_y*8+real_x;
+
+                	float cosX = COS_LUT[real_y][real_u];
+                	float cosY = COS_LUT[real_x][real_v];
+
+                	sum += block_ptr[block_ptr_index] * cosX * cosY;
+
                 }
             }
 
-            alpha_u = (u == 0) ? (1.0 / sqrt(2.0)) : 1.0;
-            alpha_v = (v == 0) ? (1.0 / sqrt(2.0)) : 1.0;
+            float cu = C_LUT[u-1];
+            float cv = C_LUT[v-1];
 
-            temp[u][v] = 0.25 * alpha_u * alpha_v * sum;
+            int freq_idx = (u-1 << 3) + v-1;
+            temp[freq_idx] = 0.25f * cv * cu * sum;
         }
     }
 
-    // Quantization
-    for (int i = 0; i < 8; i++) {
-        for (int j = 0; j < 8; j++) {
-            int idx = i * 8 + j;
-            short q = qt->values[idx];
-            double val = temp[i][j] / q;
-            block_ptr[idx] = (short)(val > 0 ? val + 0.5 : val - 0.5);
-        }
+    for(int i = 64;i!=0;i--)
+    {
+    	int q_index = i-1;
+    	short q = qt->values[q_index];
+    	float val = temp[q_index] / q;
+    	block_ptr[q_index] = (short)(val > 0 ? val + 0.5 : val - 0.5);
     }
 }
 inline void zig_zag(signed short* block_ptr) {
@@ -240,4 +244,8 @@ int serialize_into_jpg(FILE* out, unsigned char* out_buffer, size_t out_buffer_s
 }
 
 
-#endif /* DEBUG_MAIN_OPERATIONS_H_ */
+#endif
+
+/* DEBUG_MAIN_OPERATIONS_H_ */
+
+

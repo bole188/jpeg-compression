@@ -25,7 +25,8 @@ typedef struct {
     int amplitude;     // non-zero AC value
 } ac_pair_t;
 
-int encode_block(signed short* block_ptr, int* prev_dc, int* dc_diff, ac_pair_t* ac_pairs) {
+
+int encode_block(signed short* restrict block_ptr, int* restrict prev_dc, int* restrict dc_diff, ac_pair_t pm* ac_pairs) {
     *dc_diff = block_ptr[0] - *prev_dc;
     *prev_dc = block_ptr[0];
     int run = 0;
@@ -64,7 +65,7 @@ int huffman_encode_block(
     int dc_diff,
     ac_pair_t* ac_pairs,
     int ac_count,
-    bit_writer_t *bw
+    bit_writer_t pm*bw
 )
 {
     // DC ENCODING
