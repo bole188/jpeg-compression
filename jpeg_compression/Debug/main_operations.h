@@ -1,0 +1,236 @@
+/*
+ * main_operations.h
+ *
+ *  Created on: 17.01.2025.
+ *      Author: Korisnik
+ */
+
+#ifndef DEBUG_MAIN_OPERATIONS_H_
+#define DEBUG_MAIN_OPERATIONS_H_
+
+#include "entropy_coding.h"
+#define PI 3.14159265358979323846
+
+
+typedef struct {
+    int precision;
+    int table_id;
+    signed short values[64];
+} jpeg_quant_table_t;
+
+
+int zigzag_index[64] = {
+     0,  1,  8, 16,  9,  2,  3, 10,
+    17, 24, 32, 25, 18, 11,  4,  5,
+    12, 19, 26, 33, 40, 48, 41, 34,
+    27, 20, 13,  6,  7, 14, 21, 28,
+    35, 42, 49, 56, 57, 50, 43, 36,
+    29, 22, 15, 23, 30, 37, 44, 51,
+    58, 59, 52, 45, 38, 31, 39, 46,
+    53, 60, 61, 54, 47, 55, 62, 63
+};
+
+jpeg_quant_table_t qt_luminance = {
+	.precision = 0,
+	.table_id  = 0,
+	.values = {
+		16, 11, 10, 16, 24, 40, 51, 61,
+		12, 12, 14, 19, 26, 58, 60, 55,
+	    14, 13, 16, 24, 40, 57, 69, 56,
+	    14, 17, 22, 29, 51, 87, 80, 62,
+	    18, 22, 37, 56, 68,109,103, 77,
+	    24, 35, 55, 64, 81,104,113, 92,
+	    49, 64, 78, 87,103,121,120,101,
+	    72, 92, 95, 98,112,100,103, 99
+	}
+};
+
+
+void center_pixels(unsigned char* img_pixels,signed short* output_data, int width, int height) {
+    for (int i = 0; i < width * height; i++) {
+    	output_data[i] = (signed short)((img_pixels[i]) - 128);
+    }
+
+}
+
+void segment_into_blocks(const unsigned char* not_centered_pixels, int width, int height, int* num_blocks_x, int* num_blocks_y, unsigned char* result) {
+    // fill blocks
+    for (int by = 0; by < *num_blocks_y; by++) {
+        for (int bx = 0; bx < *num_blocks_x; bx++) {
+            for (int y = 0; y < 8; y++) {
+                for (int x = 0; x < 8; x++) {
+                    int img_x = bx*8 + x;
+                    int img_y = by*8 + y;
+                    int block_idx = (by * (*num_blocks_x) + bx) * 64;
+                    int pixel_idx_in_block = y * 8 + x;
+
+                    int src_x = (img_x < width) ? img_x : (width - 1);
+                    int src_y = (img_y < height) ? img_y : (height - 1);
+
+                    result[block_idx + pixel_idx_in_block] =
+                    		not_centered_pixels[src_y * width + src_x];
+                }
+            }
+        }
+    }
+}
+// the following functions operate on a single block, it is required to traverse through all blocks
+void dct_and_quantize(signed short* block_ptr, const jpeg_quant_table_t* qt)
+{
+    double temp[8][8];
+    double alpha_u, alpha_v;
+
+    // Forward 2D DCT
+    for (int u = 0; u < 8; u++) { // u is frequency row index
+        for (int v = 0; v < 8; v++) { // v is frequency col index
+            float sum = 0.0;
+
+            for (int y = 0; y < 8; y++) { // y is pixel row index
+                for (int x = 0; x < 8; x++) { // x is pixel col index
+                    // Correct pairing: u with y, v with x
+                    sum += block_ptr[y * 8 + x] *
+                           cos((2*y + 1) * u * PI / 16.0) *
+                           cos((2*x + 1) * v * PI / 16.0);
+                }
+            }
+
+            alpha_u = (u == 0) ? (1.0 / sqrt(2.0)) : 1.0;
+            alpha_v = (v == 0) ? (1.0 / sqrt(2.0)) : 1.0;
+
+            temp[u][v] = 0.25 * alpha_u * alpha_v * sum;
+        }
+    }
+
+    // Quantization
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            int idx = i * 8 + j;
+            short q = qt->values[idx];
+            double val = temp[i][j] / q;
+            block_ptr[idx] = (short)(val > 0 ? val + 0.5 : val - 0.5);
+        }
+    }
+}
+void zig_zag(signed short* block_ptr) {
+    int temp[64];
+
+    for (int i = 0; i < 64; i++) {
+        temp[i] = block_ptr[zigzag_index[i]];
+    }
+
+    for (int i = 0; i < 64; i++) {
+        block_ptr[i] = temp[i];
+    }
+}
+
+int category(int value) {
+    int abs_val = (value < 0) ? -value : value;
+    int cat = 0;
+    while (abs_val) {
+        abs_val >>= 1;
+        cat++;
+    }
+    return cat;
+}
+
+
+
+int serialize_into_jpg(FILE* out, unsigned char* out_buffer, size_t out_buffer_size, signed short* zigzag_qt, int picture_height, int picture_width,
+		int* code_lengths_DC, int* code_lengths_AC,int* AC_symbols,int* DC_symbols)
+{
+
+	unsigned char jfif_header[] = {
+	    0xFF, 0xD8,             // SOI
+	    0xFF, 0xEE,             // APP0 (JFIF)
+	    0x00, 0x10,             // length = 16
+	    'J','F','I','F',0x00,   // "JFIF\0"
+	    0x01, 0x01,             // version 1.01
+	    0x00,                   // units
+	    0x00, 0x01,             // X density
+	    0x00, 0x01,             // Y density
+	    0x00, 0x00                    // no thumbnail
+	};
+
+	fwrite(jfif_header, 1, sizeof(jfif_header), out);
+
+	unsigned char dqt_header[] = {
+		0xFF, 0xDB, 0x00, 0x43, 0x00
+	};
+
+	for(int i = 0;i<5;i++)
+	{
+		fputc(dqt_header[i],out);
+	}
+	for(int i=0;i<64;i++)
+	{
+		fputc(zigzag_qt[i],out);
+	}
+
+	unsigned char dct_header[] = {
+		0xFF, 0xC0, 0x00, 0x0B, 0x08, (unsigned char)((picture_height >> 8) & 0xFF), (unsigned char)(picture_height & 0xFF),
+		(unsigned char)((picture_width >> 8) & 0xFF), (unsigned char)(picture_width & 0xFF), 0x01,0x01,0x11,0x00
+	};
+	for(int i =0;i<sizeof(dct_header);i++)
+	{
+		fputc(dct_header[i],out);
+	}
+
+	unsigned char dht_header_1[] = {
+		0xFF,0xC4,0x00,0x1F,0x00
+	};
+	for(int i =0;i<sizeof(dht_header_1);i++)
+	{
+		fputc(dht_header_1[i],out);
+	}
+
+	for(int i =0;i<16;i++)
+	{
+		fputc(code_lengths_DC[i],out);
+	}
+
+	for(int i =0;i<12;i++)
+	{
+		fputc(DC_symbols[i],out);
+	}
+
+	unsigned char dht_header_2[] = {
+		0xFF,0xC4,0x00,0xB5,0x10
+	};
+
+	for(int i =0;i<sizeof(dht_header_2);i++)
+	{
+		fputc(dht_header_2[i],out);
+	}
+
+	for(int i =0;i<16;i++)
+	{
+		fputc(code_lengths_AC[i],out);
+	}
+
+	for(int i =0;i<162;i++)
+	{
+		fputc(AC_symbols[i],out);
+	}
+	unsigned char SOS_header[] = {
+		0xFF,0xDA, 0x00, 0x08, 0x01,0x01,0x00, 0x00, 0x3F,0x00
+	};
+	for(int i =0;i<sizeof(SOS_header);i++)
+	{
+		fputc(SOS_header[i],out);
+	}
+
+	for(int i = 0;i<out_buffer_size;i++)
+	{
+	    fputc(out_buffer[i],out);
+	}
+
+	fputc(0xFF, out);
+	fputc(0xD9, out);
+
+	fflush(out);
+
+	return 0;
+}
+
+
+#endif /* DEBUG_MAIN_OPERATIONS_H_ */
