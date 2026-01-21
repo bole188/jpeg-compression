@@ -29,7 +29,7 @@ void bw_init(bit_writer_t *bw, unsigned char *buffer, size_t cap) {
     bw->bitcount = 0;
 }
 
-void bw_write_bits(bit_writer_t *bw, unsigned short bits, int nbits)
+inline void bw_write_bits(bit_writer_t *bw, unsigned short bits, int nbits)
 {
     bits &= ((1U << nbits) - 1);
 

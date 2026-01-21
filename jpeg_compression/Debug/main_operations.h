@@ -45,15 +45,16 @@ jpeg_quant_table_t qt_luminance = {
 	}
 };
 
-
-void center_pixels(unsigned char* img_pixels,signed short* output_data, int width, int height) {
-    for (int i = 0; i < width * height; i++) {
-    	output_data[i] = (signed short)((img_pixels[i]) - 128);
-    }
-
+inline void center_pixels(unsigned char* restrict img_pixels,signed short pm* output_data) {
+#pragma optimize_for_(8)
+	for(int i = 0;i<64;i++)
+	{
+		output_data[i] = (signed short pm)(img_pixels[i])-128;
+	}
 }
 
-void segment_into_blocks(const unsigned char* not_centered_pixels, int width, int height, int* num_blocks_x, int* num_blocks_y, unsigned char* result) {
+
+void segment_into_blocks(const unsigned char* restrict not_centered_pixels, int width, int height, int* restrict num_blocks_x, int* restrict num_blocks_y, unsigned char* result) {
     // fill blocks
     for (int by = 0; by < *num_blocks_y; by++) {
         for (int bx = 0; bx < *num_blocks_x; bx++) {
@@ -64,18 +65,25 @@ void segment_into_blocks(const unsigned char* not_centered_pixels, int width, in
                     int block_idx = (by * (*num_blocks_x) + bx) * 64;
                     int pixel_idx_in_block = y * 8 + x;
 
-                    int src_x = (img_x < width) ? img_x : (width - 1);
-                    int src_y = (img_y < height) ? img_y : (height - 1);
+                    int src_x = width - 1;
+                    if(expected_true(img_x < width))
+                    	src_x = img_x;
+                    int src_y = height - 1;
+                    if(expected_true(img_y < height))
+                    	src_y = img_y;
 
-                    result[block_idx + pixel_idx_in_block] =
-                    		not_centered_pixels[src_y * width + src_x];
+
+                    int result_index = block_idx + pixel_idx_in_block;
+                    int not_centered_pixels_index = src_y * width + src_x;
+                    result[result_index] =
+                    		not_centered_pixels[not_centered_pixels_index];
                 }
             }
         }
     }
 }
 // the following functions operate on a single block, it is required to traverse through all blocks
-void dct_and_quantize(signed short* block_ptr, const jpeg_quant_table_t* qt)
+inline void dct_and_quantize(signed short pm* block_ptr, const jpeg_quant_table_t* qt)
 {
     double temp[8][8];
     double alpha_u, alpha_v;
@@ -84,7 +92,6 @@ void dct_and_quantize(signed short* block_ptr, const jpeg_quant_table_t* qt)
     for (int u = 0; u < 8; u++) { // u is frequency row index
         for (int v = 0; v < 8; v++) { // v is frequency col index
             float sum = 0.0;
-
             for (int y = 0; y < 8; y++) { // y is pixel row index
                 for (int x = 0; x < 8; x++) { // x is pixel col index
                     // Correct pairing: u with y, v with x
@@ -111,7 +118,7 @@ void dct_and_quantize(signed short* block_ptr, const jpeg_quant_table_t* qt)
         }
     }
 }
-void zig_zag(signed short* block_ptr) {
+inline void zig_zag(signed short* block_ptr) {
     int temp[64];
 
     for (int i = 0; i < 64; i++) {
@@ -123,7 +130,7 @@ void zig_zag(signed short* block_ptr) {
     }
 }
 
-int category(int value) {
+inline int category(int value) {
     int abs_val = (value < 0) ? -value : value;
     int cat = 0;
     while (abs_val) {
