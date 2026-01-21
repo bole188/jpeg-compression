@@ -28,7 +28,7 @@ def process_images_in_directory(input_dir="Images"):
             # Construct the full paths for input and header file output.
             bmp_file_path = os.path.join(input_dir, filename)
             header_file_name = os.path.splitext(filename)[0] + ".h"
-            header_file_path = os.path.join(os.getcwd(), header_file_name)
+            header_file_path = os.path.join(os.getcwd(), "Debug", header_file_name)
             array_name = os.path.splitext(filename)[0]
 
             try:
@@ -48,6 +48,7 @@ def process_images_in_directory(input_dir="Images"):
                     
                     f.write(f"const unsigned int test_image_width = {width};\n")
                     f.write(f"const unsigned int test_image_height = {height};\n\n")
+                    f.write(f'#pragma section("seg_block3")\n')
                     f.write(f"const unsigned char data1[] = {{\n")
                     
                     # Write pixel data in hexadecimal format.
