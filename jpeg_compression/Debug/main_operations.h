@@ -45,38 +45,53 @@ jpeg_quant_table_t qt_luminance = {
 	}
 };
 
-inline void center_pixels(signed short* restrict img_pixels,signed short pm* output_data) {
-#pragma all_external_access_reg_optimized
-#pragma vector_for
-	for(int i = 0;i<64;i++)
+void center_pixels(signed short* restrict img_pixels,signed short pm* output_data) {
+	for(int i = 64;i!=0;i--)
 	{
-		output_data[i] = (signed short pm)(img_pixels[i])-128;
+		int index = 64 -i;
+		output_data[index] = (signed short pm)(img_pixels[index])-128;
+	}
+}
+
+
+void calculate_inv_qt(float pm* restrict inv_qt)
+{
+	for(int i  = 64;i != 0; i--)
+	{
+		int index = i-1;
+	    inv_qt[index] = 1.0f / (float)qt_luminance.values[index];
 	}
 }
 
 
 void segment_into_blocks(const unsigned char* restrict not_centered_pixels, int width, int height, int* restrict num_blocks_x, int* restrict num_blocks_y, unsigned char* result) {
-    // fill blocks
-    for (int by = 0; by < *num_blocks_y; by++) {
-        for (int bx = 0; bx < *num_blocks_x; bx++) {
-            for (int y = 0; y < 8; y++) {
-                for (int x = 0; x < 8; x++) {
-                    int img_x = bx*8 + x;
-                    int img_y = by*8 + y;
-                    int block_idx = (by * (*num_blocks_x) + bx) * 64;
-                    int pixel_idx_in_block = y * 8 + x;
 
-                    int src_x = width - 1;
+    for (int by = *num_blocks_y; by != 0 ; by--) {
+    	int real_by = *num_blocks_y - by;
+        for (int bx = *num_blocks_x; bx != 0; bx--) {
+        	int real_bx = *num_blocks_x - bx;
+        	int block_idx = (real_by * (*num_blocks_x) + real_bx) * 64;
+        	unsigned char* result_p = result + block_idx;
+            for (int y = 8; y != 0; y--) {
+                for (int x = 8; x != 0; x--) {
+                	int real_x = 8 - x;
+                	int real_y = 8 - y;
+                    int img_x = real_bx*8 + real_x;
+                    int img_y = real_by*8 + real_y;
+                    int src_x;
+                    int src_y;
                     if(expected_true(img_x < width))
                     	src_x = img_x;
-                    int src_y = height - 1;
+                    else
+                    	src_x = width -1;
+
                     if(expected_true(img_y < height))
                     	src_y = img_y;
+                    else
+                    	src_y = height-1;
 
-
-                    int result_index = block_idx + pixel_idx_in_block;
                     int not_centered_pixels_index = src_y * width + src_x;
-                    result[result_index] =
+                    *result_p++ =
                     		not_centered_pixels[not_centered_pixels_index];
                 }
             }
@@ -84,57 +99,73 @@ void segment_into_blocks(const unsigned char* restrict not_centered_pixels, int 
     }
 }
 // the following functions operate on a single block, it is required to traverse through all blocks
-inline void dct_and_quantize(signed short pm* block_ptr, const jpeg_quant_table_t* qt, float pm* restrict temp)
+void dct(signed short pm* block_ptr, float pm* restrict temp)
 {
-    // Forward 2D DCT
-    for (int u = 8; u != 0; u--) {
-        for (int v = 8; v != 0; v--) {
-            float sum = 0.0;
-            for (int y = 8; y != 0; y--) {
-                for (int x = 8; x != 0; x--) {
-                	int real_x = x-1;
-                	int real_u = u-1;
-                	int real_y = y-1;
-                	int real_v = v-1;
-                	int block_ptr_index = real_y*8+real_x;
 
-                	float cosX = COS_LUT[real_y][real_u];
-                	float cosY = COS_LUT[real_x][real_v];
+    float intermediate[64];
+    float intermediate_2[64];
+    float * inter_p = &intermediate[63];
+    signed short* block_p = block_ptr;
+    const float* cos_lifted_1_T_p = COS_LIFTED_1_T + 63;
+    int intermediate_index;
+    int block_ptr_index;
 
-                	sum += block_ptr[block_ptr_index] * cosX * cosY;
-
-                }
+	#pragma loop_count(8)
+    for (int y = 8; y != 0; y--) {
+        int ry = y - 1;
+        cos_lifted_1_T_p = COS_LIFTED_1_T + 63;
+		#pragma loop_count(8)
+        for (int u = 8; u != 0; u--) {
+            float sum = 0.0f;
+            block_p = block_ptr+(ry*8) + 7;
+			#pragma loop_count(8)
+            for (int x = 8; x != 0; x--) {
+                sum += (float)(*block_p--) * *cos_lifted_1_T_p--;
             }
-
-            float cu = C_LUT[u-1];
-            float cv = C_LUT[v-1];
-
-            int freq_idx = (u-1 << 3) + v-1;
-            temp[freq_idx] = 0.25f * cv * cu * sum;
+            *inter_p-- = sum;
         }
     }
 
-    for(int i = 64;i!=0;i--)
-    {
-    	int q_index = i-1;
-    	short q = qt->values[q_index];
-    	float val = temp[q_index] / q;
-    	block_ptr[q_index] = (short)(val > 0 ? val + 0.5 : val - 0.5);
+    for (int u = 8; u != 0; u--) {
+        int ru = u - 1;
+        for (int v = 8; v != 0; v--) {
+            int rv = v - 1;
+            float sum = 0.0f;
+            for (int y = 8; y != 0; y--) {
+                int ry = y - 1;
+                intermediate_index = ry * 8 + ru;
+                sum += intermediate[intermediate_index] * COS_LIFTED_2[ry][rv];
+            }
+
+            int freq_idx = (rv * 8) + ru;
+            temp[freq_idx]  = sum;
+        }
     }
 }
-inline void zig_zag(signed short* block_ptr) {
+
+void quantization(signed short pm* restrict block_ptr,float pm* restrict temp, float pm* restrict inv_qt)
+{
+	for(int i = 64;i!=0;i--)
+	{
+		int index = i - 1;
+		block_ptr[index] = (short)(temp[index] * inv_qt[index]);
+	}
+}
+
+void zig_zag(signed short*restrict block_ptr) {
     int temp[64];
 
-    for (int i = 0; i < 64; i++) {
-        temp[i] = block_ptr[zigzag_index[i]];
+    for (int i = 64; i != 0; i--) {
+    	int index = 64 - i;
+        temp[index] = block_ptr[zigzag_index[index]];
     }
-
-    for (int i = 0; i < 64; i++) {
-        block_ptr[i] = temp[i];
+    for (int i = 64; i != 0; i--) {
+    	int index = 64 - i;
+        block_ptr[index] = temp[index];
     }
 }
 
-inline int category(int value) {
+int category(int value) {
     int abs_val = (value < 0) ? -value : value;
     int cat = 0;
     while (abs_val) {
@@ -168,72 +199,42 @@ int serialize_into_jpg(FILE* out, unsigned char* out_buffer, size_t out_buffer_s
 		0xFF, 0xDB, 0x00, 0x43, 0x00
 	};
 
-	for(int i = 0;i<5;i++)
-	{
-		fputc(dqt_header[i],out);
-	}
-	for(int i=0;i<64;i++)
-	{
-		fputc(zigzag_qt[i],out);
-	}
+	fwrite(dqt_header, 1,sizeof(dqt_header),out);
+	fwrite(zigzag_qt, 1,64,out);
 
 	unsigned char dct_header[] = {
 		0xFF, 0xC0, 0x00, 0x0B, 0x08, (unsigned char)((picture_height >> 8) & 0xFF), (unsigned char)(picture_height & 0xFF),
 		(unsigned char)((picture_width >> 8) & 0xFF), (unsigned char)(picture_width & 0xFF), 0x01,0x01,0x11,0x00
 	};
-	for(int i =0;i<sizeof(dct_header);i++)
-	{
-		fputc(dct_header[i],out);
-	}
+	fwrite(dct_header,1,sizeof(dct_header),out);
 
 	unsigned char dht_header_1[] = {
 		0xFF,0xC4,0x00,0x1F,0x00
 	};
-	for(int i =0;i<sizeof(dht_header_1);i++)
-	{
-		fputc(dht_header_1[i],out);
-	}
 
-	for(int i =0;i<16;i++)
-	{
-		fputc(code_lengths_DC[i],out);
-	}
+	fwrite(dht_header_1,1,sizeof(dht_header_1),out);
 
-	for(int i =0;i<12;i++)
-	{
-		fputc(DC_symbols[i],out);
-	}
+	fwrite(code_lengths_DC,1,16,out);
+
+	fwrite(DC_symbols,1,12,out);
 
 	unsigned char dht_header_2[] = {
 		0xFF,0xC4,0x00,0xB5,0x10
 	};
 
-	for(int i =0;i<sizeof(dht_header_2);i++)
-	{
-		fputc(dht_header_2[i],out);
-	}
+	fwrite(dht_header_2,1,sizeof(dht_header_2),out);
 
-	for(int i =0;i<16;i++)
-	{
-		fputc(code_lengths_AC[i],out);
-	}
+	fwrite(code_lengths_AC,1,16,out);
 
-	for(int i =0;i<162;i++)
-	{
-		fputc(AC_symbols[i],out);
-	}
+	fwrite(AC_symbols,1,162,out);
+
 	unsigned char SOS_header[] = {
 		0xFF,0xDA, 0x00, 0x08, 0x01,0x01,0x00, 0x00, 0x3F,0x00
 	};
-	for(int i =0;i<sizeof(SOS_header);i++)
-	{
-		fputc(SOS_header[i],out);
-	}
 
-	for(int i = 0;i<out_buffer_size;i++)
-	{
-	    fputc(out_buffer[i],out);
-	}
+	fwrite(SOS_header,1,sizeof(SOS_header),out);
+
+	fwrite(out_buffer,1,out_buffer_size,out);
 
 	fputc(0xFF, out);
 	fputc(0xD9, out);
