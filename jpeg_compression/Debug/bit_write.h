@@ -14,7 +14,7 @@
 #include <math.h>
 
 typedef struct {
-    unsigned char *buf;
+    unsigned char *buf; 
     size_t   capacity;
     size_t   size;
     unsigned int bitbuf;

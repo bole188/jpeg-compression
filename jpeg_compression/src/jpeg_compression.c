@@ -17,7 +17,6 @@
 #pragma section("seg_block2")
 unsigned char data2[200000];
 
-#pragma section("seg_block1")
 unsigned char data4[16000];
 
 #pragma section("seg_pm_mem")
@@ -27,13 +26,21 @@ signed short pm current_block[64];
 signed short uncentered_block[128];
 
 #pragma section("seg_pm_mem")
+#pragma align 4
 ac_pair_t pm ac_coef[256];
 
 #pragma section("seg_pm_mem")
+#pragma align 4
 bit_writer_t pm bw;
 
 #pragma section("seg_pm_mem")
+#pragma align 4
 float pm temp[64];
+
+#pragma section("seg_pm_mem")
+#pragma align 4
+float pm inv_qt[64];
+
 
 void initialize_DMA()
 {
@@ -63,46 +70,54 @@ int main(int argc, char *argv[])
     int num_blocks_x = (test_image_width + 7) / 8;
     int num_blocks_y = (test_image_height + 7) / 8;
     int total_blocks = (num_blocks_x) * (num_blocks_y);
-    START_CYCLE_COUNT(start_count);
+
     segment_into_blocks(data1, test_image_width, test_image_height, &num_blocks_x, &num_blocks_y, data2);
+
 	initialize_DMA();
+
     int prev_dc = 0;
     int dc_diff=0;
 
     for (int block = 0; block < total_blocks; block++) {
     	int index = block * 64;
 
+    	calculate_inv_qt(inv_qt);
+
         while(*pECEP0 > 0);
 
         if (expected_true(block < total_blocks - 1))
         {
         	int next_buf = 1 - current_buf;
+        	int next_index = (block + 1) * 64;
         	*pDMAC0 &= ~DEN;
-        	*pEIEP0 = (unsigned int)(data2 + sizeof(char) * index);
+        	*pEIEP0 = (unsigned int)(data2 + next_index);
         	*pIIEP0 = (unsigned int)&uncentered_block[next_buf*64];
         	*pICEP0 = 64;
         	*pDMAC0 |= DEN;
         }
-    	center_pixels(&uncentered_block[current_buf*64], current_block);
+        int uncentered_index = current_buf * 64;
+    	center_pixels(&uncentered_block[uncentered_index], current_block);
 
-    	START_CYCLE_COUNT(start_bottle_neck_count);
-        dct_and_quantize(current_block, &qt_luminance,temp);
-        STOP_CYCLE_COUNT(final_bottle_neck_count,start_bottle_neck_count);
-        if (block == 0) PRINT_CYCLES("Number of total cycles for DCT and quantization: ",final_bottle_neck_count*total_blocks);
+        dct(current_block,temp);
+
+        quantization(current_block,temp,inv_qt);
+
         zig_zag(current_block);
+
         memset(ac_coef, 0, sizeof(ac_coef));
+
         int num_of_ac_pairs = encode_block(current_block, &prev_dc, &dc_diff, ac_coef);
         if (num_of_ac_pairs > sizeof(ac_coef)/sizeof(ac_coef[0])) {
             printf("Error: too many AC pairs!\n");
             exit(1);
         }
+
         int num_bits_current_block = huffman_encode_block(dc_diff, ac_coef, num_of_ac_pairs, &bw);
+
         current_buf = 1 - current_buf;
     }
 
     bw_flush(&bw);
-    STOP_CYCLE_COUNT(final_count,start_count);
-    PRINT_CYCLES("Number of total cycles for 131x113 image: ",final_count);
     FILE* out = fopen("compressed_image.jpeg", "wb");
     zig_zag(qt_luminance.values);
     serialize_into_jpg(out, bw.buf, bw.size, qt_luminance.values, num_blocks_y*8, num_blocks_x*8,
