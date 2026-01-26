@@ -17,6 +17,7 @@
 #pragma section("seg_block2")
 unsigned char data2[200000];
 
+#pragma align 4
 unsigned char data4[16000];
 
 #pragma section("seg_pm_mem")
@@ -25,17 +26,13 @@ signed short pm current_block[64];
 
 signed short uncentered_block[128];
 
-#pragma section("seg_pm_mem")
 #pragma align 4
 ac_pair_t pm ac_coef[256];
 
-#pragma section("seg_pm_mem")
 #pragma align 4
-bit_writer_t pm bw;
+bit_writer_t bw;
 
-#pragma section("seg_pm_mem")
-#pragma align 4
-float pm temp[64];
+float temp[64];
 
 #pragma section("seg_pm_mem")
 #pragma align 4
@@ -57,14 +54,8 @@ void initialize_DMA()
 }
 
 
-cycle_t start_count;
-cycle_t final_count;
-cycle_t start_bottle_neck_count;
-cycle_t final_bottle_neck_count;
-
-
 int main(int argc, char *argv[])
-{
+{	
 	int current_buf = 0;
 	bw_init(&bw, data4, sizeof(data4));
     int num_blocks_x = (test_image_width + 7) / 8;
@@ -99,7 +90,7 @@ int main(int argc, char *argv[])
     	center_pixels(&uncentered_block[uncentered_index], current_block);
 
         dct(current_block,temp);
-
+        
         quantization(current_block,temp,inv_qt);
 
         zig_zag(current_block);
@@ -107,10 +98,6 @@ int main(int argc, char *argv[])
         memset(ac_coef, 0, sizeof(ac_coef));
 
         int num_of_ac_pairs = encode_block(current_block, &prev_dc, &dc_diff, ac_coef);
-        if (num_of_ac_pairs > sizeof(ac_coef)/sizeof(ac_coef[0])) {
-            printf("Error: too many AC pairs!\n");
-            exit(1);
-        }
 
         int num_bits_current_block = huffman_encode_block(dc_diff, ac_coef, num_of_ac_pairs, &bw);
 
